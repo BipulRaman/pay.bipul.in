@@ -1,1 +1,0 @@
-# pay.bipul.in
