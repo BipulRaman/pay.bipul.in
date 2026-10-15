@@ -1,140 +1,80 @@
 import { describe, expect, it } from 'vitest';
 import QRCode from 'qrcode';
 import {
-  INITIAL_FORM, REQUEST_TTL_MS, buildUpiUri, createDemoEvent,
-  createPaymentRequest, formatMoney, parseAmount, validateForm, verifyDemoEvent,
+  EXAMPLE_UPI_ADDRESS, buildPaymentPath, buildUpiUri,
+  getPayeeName, getPaymentRoute, isValidUpiAddress,
 } from './payment';
-import type { PaymentStatus, Scenario } from './payment';
 
-describe('amount validation in integer paise', () => {
+describe('UPI address validation', () => {
   it.each([
-    ['1', 100], ['1.01', 101], ['499.9', 49990], ['100000', 10000000],
-    ['100000.00', 10000000], [' 42.50 ', 4250], ['000001.10', 110],
-  ])('parses %s exactly', (input, expected) => {
-    expect(parseAmount(input)).toBe(expected);
+    EXAMPLE_UPI_ADDRESS, 'alice@okaxis', '9876543210@ybl',
+    'alice.smith@oksbi', 'TEST_name-1@Bank12',
+  ])('accepts %s', upiId => {
+    expect(isValidUpiAddress(upiId)).toBe(true);
   });
 
   it.each([
-    '', ' ', '0', '0.99', '-1', '+1', '1e3', 'NaN', 'Infinity',
-    '1,000', '1.001', '1.', '.50', '100000.01', '999999999999',
-    '0xFF', '10 00', '1\n2',
-  ])('rejects invalid or out-of-range amount %j', input => {
-    expect(parseAmount(input)).toBeNull();
-    expect(validateForm({ ...INITIAL_FORM, amount: input }).amount).toBeTruthy();
+    '', ' ', '1234567890', 'name@', '@bank', 'name@@bank', 'a b@bank',
+    'name@bank&am=1', '<script>@upi', '.name@upi', ' alice@upi ',
+    'alice@upi\n', 'https://example.com/alice@upi', 'alice@upi/extra',
+    `${'a'.repeat(257)}@bank`, `alice@${'b'.repeat(65)}`,
+  ])('rejects invalid address %j in validation and link builders', upiId => {
+    expect(isValidUpiAddress(upiId)).toBe(false);
+    expect(() => buildUpiUri(upiId)).toThrow('Enter a valid UPI address');
+    expect(() => buildPaymentPath(upiId)).toThrow('Enter a valid UPI address');
   });
 });
 
-describe('UPI request validation', () => {
-  it('accepts the example form', () => {
-    expect(validateForm(INITIAL_FORM)).toEqual({});
+describe('payment page routing', () => {
+  it('recognizes the homepage', () => {
+    expect(getPaymentRoute('/')).toEqual({ kind: 'home' });
   });
 
-  it.each(['alice@okaxis', '9876543210@ybl', 'alice.smith@oksbi', 'TEST_name-1@Bank12', ' alice@upi '])('accepts conservative UPI syntax %s', upiId => {
-    expect(validateForm({ ...INITIAL_FORM, upiId }).upiId).toBeUndefined();
+  it.each([
+    '/alumni.fundcollection@boi', '/alumni.fundcollection%40boi',
+    '/alumni.fundcollection@boi/',
+  ])('reads an address from %s', path => {
+    expect(getPaymentRoute(path)).toEqual({ kind: 'payment', upiId: EXAMPLE_UPI_ADDRESS });
   });
 
-  it.each(['', '1234567890', 'name@', '@bank', 'name@@bank', 'a b@bank', 'name@bank&am=1', '<script>@upi', '.name@upi'])('rejects invalid UPI ID %j', upiId => {
-    expect(validateForm({ ...INITIAL_FORM, upiId }).upiId).toBeTruthy();
+  it.each([
+    '/invalid', '/alice@upi/extra', '//alice@upi', '/%ZZ', '/%E0%A4%A',
+    '/alice%40upi%26am%3D1', '/alice%2540upi', '/alice%40upi%2F',
+    '/%3Cscript%3E%40upi', '/alice%40upi%0A', '/%20alice%40upi',
+  ])('rejects malformed paths without throwing: %s', path => {
+    expect(getPaymentRoute(path)).toEqual({ kind: 'invalid' });
   });
 
-  it('checks name and note boundaries and control characters', () => {
-    expect(validateForm({ ...INITIAL_FORM, payeeName: '   ' }).payeeName).toBeTruthy();
-    expect(validateForm({ ...INITIAL_FORM, payeeName: 'x'.repeat(61) }).payeeName).toBeTruthy();
-    expect(validateForm({ ...INITIAL_FORM, payeeName: 'a\u0000b' }).payeeName).toBeTruthy();
-    expect(validateForm({ ...INITIAL_FORM, payeeName: 'x'.repeat(60) }).payeeName).toBeUndefined();
-    expect(validateForm({ ...INITIAL_FORM, note: 'x'.repeat(81) }).note).toBeTruthy();
-    expect(validateForm({ ...INITIAL_FORM, note: 'hello\nworld' }).note).toBeTruthy();
-    expect(validateForm({ ...INITIAL_FORM, note: 'x'.repeat(80) }).note).toBeUndefined();
-    expect(validateForm({ ...INITIAL_FORM, note: '' }).note).toBeUndefined();
-  });
-
-  it('refuses to create an invalid request', () => {
-    expect(() => createPaymentRequest({ ...INITIAL_FORM, amount: '-1' })).toThrow('Correct the payment details');
-  });
-
-  it('creates unique references, a normalized snapshot, and a five-minute window', () => {
-    const form = { ...INITIAL_FORM, payeeName: '  Demo  ', upiId: ' alice@upi ', note: ' Thanks! ' };
-    const first = createPaymentRequest(form, 1000);
-    const second = createPaymentRequest(form, 1000);
-    expect(first.reference).toMatch(/^D[A-F0-9]{32}$/);
-    expect(first.reference).not.toBe(second.reference);
-    expect(first).toMatchObject({
-      amountPaise: 49900, payeeName: 'Demo', upiId: 'alice@upi',
-      note: 'Thanks!', currency: 'INR', status: 'pending', expiresAt: 1000 + REQUEST_TTL_MS,
+  it('creates shareable paths with a literal @ and preserves case', () => {
+    expect(buildPaymentPath(EXAMPLE_UPI_ADDRESS)).toBe('/alumni.fundcollection@boi');
+    expect(getPaymentRoute(buildPaymentPath('TEST_name-1@Bank12'))).toEqual({
+      kind: 'payment', upiId: 'TEST_name-1@Bank12',
     });
-    form.amount = '1';
-    expect(first.amountPaise).toBe(49900);
   });
 });
 
 describe('UPI URI and QR', () => {
-  it('encodes all fields without allowing query parameter injection', () => {
-    const payment = createPaymentRequest({
-      ...INITIAL_FORM, payeeName: 'Studio & Friends', note: 'Order #1 &am=1? Thanks \u20b9',
-    });
-    const uri = new URL(buildUpiUri(payment));
+  it('matches the requested alumni URI exactly, with the amount left to the UPI app', () => {
+    expect(buildUpiUri(EXAMPLE_UPI_ADDRESS)).toBe(
+      'upi://pay?pa=alumni.fundcollection@boi&pn=JNV%20Sitamarhi%20Alumni',
+    );
+  });
+
+  it('uses any valid address as the destination and fallback display label', () => {
+    const upiId = 'alice.smith@okaxis';
+    const uri = new URL(buildUpiUri(upiId));
     expect(uri.protocol).toBe('upi:');
     expect(uri.hostname).toBe('pay');
-    expect(Object.fromEntries(uri.searchParams)).toEqual({
-      pa: payment.upiId, pn: 'Studio & Friends', tr: payment.reference, am: '499.00',
-      cu: 'INR', tn: 'Order #1 &am=1? Thanks \u20b9',
-    });
-    expect(uri.searchParams.getAll('am')).toEqual(['499.00']);
+    expect(Object.fromEntries(uri.searchParams)).toEqual({ pa: upiId, pn: upiId });
+    expect(getPayeeName(upiId)).toBe(upiId);
   });
 
-  it('omits an empty optional note', () => {
-    const payment = createPaymentRequest({ ...INITIAL_FORM, note: '' });
-    expect(new URL(buildUpiUri(payment)).searchParams.has('tn')).toBe(false);
-  });
-
-  it('can encode even the largest allowed request in a QR code', () => {
-    const payment = createPaymentRequest({
-      payeeName: 'A'.repeat(60), amount: '100000.00',
-      upiId: `${'a'.repeat(256)}@${'b'.repeat(64)}`, note: '\u20b9'.repeat(80),
-    });
-    const qr = QRCode.create(buildUpiUri(payment), { errorCorrectionLevel: 'M' });
+  it('encodes the largest allowed address in a QR code', () => {
+    const upiId = `${'a'.repeat(256)}@${'b'.repeat(64)}`;
+    const uri = buildUpiUri(upiId);
+    const qr = QRCode.create(uri, { errorCorrectionLevel: 'M' });
     expect(qr.modules.size).toBeGreaterThan(0);
     expect(qr.version).toBeLessThanOrEqual(40);
-  });
-
-  it('formats amounts using Indian currency grouping', () => {
-    expect(formatMoney(10000000)).toContain('1,00,000.00');
-  });
-});
-
-describe('simulated event validation', () => {
-  const timestamp = 10000;
-  const payment = createPaymentRequest(INITIAL_FORM, timestamp);
-
-  it('accepts a matching success event, with an explicit simulation disclaimer', () => {
-    expect(verifyDemoEvent(payment, createDemoEvent(payment, 'success'), timestamp)).toMatchObject({
-      accepted: true, status: 'success', message: expect.stringContaining('No bank verification occurred'),
-    });
-  });
-
-  it('accepts a matching decline without marking success', () => {
-    expect(verifyDemoEvent(payment, createDemoEvent(payment, 'failed'), timestamp)).toMatchObject({
-      accepted: true, status: 'failed',
-    });
-  });
-
-  it.each<Scenario>(['amount-mismatch', 'reference-mismatch', 'payee-mismatch', 'currency-mismatch'])('rejects %s and keeps waiting', scenario => {
-    expect(verifyDemoEvent(payment, createDemoEvent(payment, scenario), timestamp)).toMatchObject({
-      accepted: false, status: 'pending', message: expect.stringContaining(`${scenario.split('-')[0]} mismatch`),
-    });
-  });
-
-  it('accepts an event only strictly before expiry', () => {
-    const event = createDemoEvent(payment, 'success');
-    expect(verifyDemoEvent(payment, event, payment.expiresAt - 1).status).toBe('success');
-    expect(verifyDemoEvent(payment, event, payment.expiresAt)).toMatchObject({ accepted: false, status: 'expired' });
-    expect(verifyDemoEvent({ ...payment, status: 'verifying' }, event, payment.expiresAt + 1).status).toBe('expired');
-  });
-
-  it.each<PaymentStatus>(['success', 'failed', 'expired'])('never changes a closed %s request, even after its original deadline', status => {
-    const closed = { ...payment, status };
-    for (const now of [timestamp, payment.expiresAt + 1]) {
-      expect(verifyDemoEvent(closed, createDemoEvent(closed, 'success'), now)).toMatchObject({ status, accepted: false });
-    }
+    expect(getPaymentRoute(buildPaymentPath(upiId))).toEqual({ kind: 'payment', upiId });
   });
 });
