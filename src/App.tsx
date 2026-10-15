@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import QRCode from 'qrcode';
 import { Icon } from './Icon';
 import {
-  EXAMPLE_UPI_ADDRESS, UPI_ADDRESS_ERROR, buildPaymentPath, buildUpiUri,
-  getPayeeName, getPaymentRoute, isValidUpiAddress,
+  EXAMPLE_UPI_ADDRESS, UPI_ADDRESS_ERROR, buildPaymentPath, buildUpiUri, buildUpiAppUri,
+  detectPaymentPlatform, getPayeeName, getPaymentRoute, getUpiApps, isValidUpiAddress,
 } from './payment';
+import type { PaymentPlatform } from './payment';
 
 export default function App() {
   const [pathname, setPathname] = useState(window.location.pathname);
@@ -125,6 +126,8 @@ function PaymentPage({ upiId }: { upiId: string }) {
   const [qrError, setQrError] = useState('');
   const [copyNotice, setCopyNotice] = useState('');
   const [copyError, setCopyError] = useState('');
+  const [platform] = useState(() => detectPaymentPlatform(navigator.userAgent, navigator.maxTouchPoints));
+  const isMobile = platform !== 'desktop';
 
   useEffect(() => {
     let cancelled = false;
@@ -134,7 +137,7 @@ function PaymentPage({ upiId }: { upiId: string }) {
     }).then(image => {
       if (!cancelled) setQrCode(image);
     }).catch(() => {
-      if (!cancelled) setQrError('Could not generate the QR code. Use the Pay with UPI app button or reload this page to try again.');
+      if (!cancelled) setQrError('Could not generate the QR code. Use a UPI app button or reload this page to try again.');
     });
     return () => { cancelled = true; };
   }, [uri]);
@@ -156,23 +159,40 @@ function PaymentPage({ upiId }: { upiId: string }) {
     }
   }
 
+  const qr = (
+    <div className="qr-area">
+      {qrError ? <p className="error-message" role="alert">{qrError}</p>
+        : qrCode ? <img className="qr-code" src={qrCode} width="288" height="288" alt={`UPI payment QR for ${upiId}`} />
+          : <p className="qr-loading" role="status">Generating your QR code...</p>}
+    </div>
+  );
+
   return (
     <div className="payment-layout">
       <section className="card payment-card" aria-labelledby="payee-title">
         <span className="eyebrow">PAYING TO</span>
         <h1 id="payee-title">{payeeName}</h1>
         {payeeName !== upiId && <p className="payee-address">{upiId}</p>}
-        <p className="payment-intro">Scan to pay with any compatible UPI app.</p>
+        <p className="payment-intro">{isMobile ? 'Choose your UPI app to pay directly.' : 'Scan to pay with any compatible UPI app.'}</p>
 
-        <div className="qr-area">
-          {qrError ? <p className="error-message" role="alert">{qrError}</p>
-            : qrCode ? <img className="qr-code" src={qrCode} width="288" height="288" alt={`UPI payment QR for ${upiId}`} />
-              : <p className="qr-loading" role="status">Generating your QR code...</p>}
-        </div>
-
-        <p className="amount-hint">Choose the amount in your UPI app.</p>
-        <a className="button button-primary" href={uri}><Icon name="external" />Pay with UPI app</a>
-        <p className="device-hint">On a computer? Scan the QR with your phone.<br />On a phone? The button opens your installed UPI app.</p>
+        {isMobile ? (
+          <>
+            <p className="amount-hint">Choose the amount in your UPI app.</p>
+            <UpiAppPicker uri={uri} platform={platform} />
+            <details className="qr-fallback">
+              <summary><Icon name="qr" />Show QR code instead</summary>
+              {qr}
+              <p className="device-hint">Scan with another phone's UPI app.</p>
+            </details>
+          </>
+        ) : (
+          <>
+            {qr}
+            <p className="amount-hint">Choose the amount in your UPI app.</p>
+            <a className="button button-primary" href={uri}><Icon name="external" />Pay with UPI app</a>
+            <p className="device-hint">Scan with your phone, or open a compatible UPI app installed on this device.</p>
+          </>
+        )}
 
         <div className="payment-warning"><Icon name="shield" /><p>Verify the recipient's name and UPI address in your app before authorizing a payment.</p></div>
       </section>
@@ -187,5 +207,36 @@ function PaymentPage({ upiId }: { upiId: string }) {
         <a className="home-link" href="/">Create a page for another UPI address<Icon name="arrow" /></a>
       </section>
     </div>
+  );
+}
+
+function UpiAppPicker({ uri, platform }: { uri: string; platform: PaymentPlatform }) {
+  const apps = getUpiApps(platform);
+  const [showAll, setShowAll] = useState(false);
+  const [launchNotice, setLaunchNotice] = useState('');
+  const listId = useId();
+
+  function onLaunch(appName: string) {
+    setLaunchNotice(`If ${appName} doesn't open, check that it is installed, try another app, or use the QR code. In-app browsers may require opening this page in Safari or Chrome.`);
+  }
+
+  return (
+    <section className="app-picker" aria-label="Choose a UPI app">
+      <div className="upi-app-grid" id={listId}>
+        {(showAll ? apps : apps.slice(0, 4)).map(app => (
+          <a
+            className="upi-app-button" key={app.id} href={buildUpiAppUri(uri, app.id)}
+            aria-label={`Pay with ${app.name}`} onClick={() => onLaunch(app.name)}
+          >
+            <span className={`upi-app-mark app-${app.id}`} aria-hidden="true">{app.mark}</span>
+            <span>{app.name}</span>
+          </a>
+        ))}
+      </div>
+      {apps.length > 4 && <button className="show-apps-button" type="button" aria-expanded={showAll} aria-controls={listId} onClick={() => setShowAll(previous => !previous)}>{showAll ? 'Show fewer apps' : 'Show more UPI apps'}</button>}
+      {platform === 'android' && <a className="button button-secondary" href={uri} onClick={() => onLaunch('a UPI app')}><Icon name="external" />Other UPI apps</a>}
+      <p className="device-hint">Choose an app installed on this device. App availability and payment acceptance depend on your app and bank.</p>
+      {launchNotice && <p className="launch-notice" role="status">{launchNotice}</p>}
+    </section>
   );
 }

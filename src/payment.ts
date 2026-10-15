@@ -1,6 +1,40 @@
 export const EXAMPLE_UPI_ADDRESS = 'alumni.fundcollection@boi';
 export const UPI_ADDRESS_ERROR = 'Enter a valid UPI address, such as name@bank.';
 
+export type PaymentPlatform = 'android' | 'ios' | 'desktop';
+
+// One-time payment schemes from Solidgate's UPI Intent mobile integration guide.
+export const UPI_APPS = [
+  { id: 'google-pay', name: 'Google Pay', mark: 'G', prefix: 'tez://upi/pay', platforms: ['android', 'ios'] },
+  { id: 'phonepe', name: 'PhonePe', mark: 'Pe', prefix: 'phonepe://pay', platforms: ['android', 'ios'] },
+  { id: 'paytm', name: 'Paytm', mark: 'P', prefix: 'paytmmp://pay', platforms: ['android', 'ios'] },
+  { id: 'bhim', name: 'BHIM', mark: 'B', prefix: 'bhim://upi/pay', platforms: ['android', 'ios'] },
+  { id: 'cred', name: 'CRED', mark: 'C', prefix: 'credpay://upi/pay', platforms: ['android', 'ios'] },
+  { id: 'amazon-pay', name: 'Amazon Pay', mark: 'a', prefix: 'amazonpay://upi/pay', platforms: ['android'] },
+  { id: 'navi', name: 'Navi', mark: 'N', prefix: 'navi://pay', platforms: ['android'] },
+] as const;
+
+export type UpiAppId = typeof UPI_APPS[number]['id'];
+
+export function detectPaymentPlatform(userAgent: string, maxTouchPoints = 0): PaymentPlatform {
+  if (/android/i.test(userAgent)) return 'android';
+  if (/iPhone|iPad|iPod/i.test(userAgent) || (/Macintosh/i.test(userAgent) && maxTouchPoints > 1)) {
+    return 'ios';
+  }
+  return 'desktop';
+}
+
+export function getUpiApps(platform: PaymentPlatform) {
+  return UPI_APPS.filter(app => app.platforms.some(supported => supported === platform));
+}
+
+export function buildUpiAppUri(uri: string, appId: UpiAppId): string {
+  if (!uri.startsWith('upi://pay?')) throw new Error('Expected a one-time UPI payment URI.');
+  const app = UPI_APPS.find(candidate => candidate.id === appId);
+  if (!app) throw new Error('Unknown UPI app.');
+  return `${app.prefix}${uri.slice('upi://pay'.length)}`;
+}
+
 export type PaymentRoute =
   | { kind: 'home' }
   | { kind: 'payment'; upiId: string }

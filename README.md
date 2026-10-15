@@ -6,7 +6,7 @@ A React + TypeScript app that turns a UPI address into a shareable payment page.
 
 - Visit `https://pay.bipul.in/` and enter a recipient's UPI address.
 - Or open a direct link, such as `https://pay.bipul.in/alumni.fundcollection@boi`.
-- The payment page immediately shows a QR code and a **Pay with UPI app** button. Both use the same UPI URI.
+- On mobile, the payment page shows app-specific payment buttons. On desktop, it immediately shows a QR code and a **Pay with UPI app** button.
 - Choose the amount and verify the recipient in your UPI app before authorizing payment.
 - **Copy payment link** copies the shareable website URL, so another person can scan the QR or open their own UPI app.
 
@@ -21,6 +21,28 @@ Other valid addresses are supported at `/{upi-address}`. For unknown recipients,
 Addresses are syntax-checked: 2-256 characters before `@` (letters, digits, `.`, `_`, `-`, starting with a letter or digit), and a 2-64 character alphanumeric handle starting with a letter. Homepage input is trimmed. Encoded addresses such as `/alumni.fundcollection%40boi` and a single trailing slash are supported. Invalid or malformed paths show an error and address-entry form, never a payment action.
 
 The old playground and simulated payment outcomes have been removed.
+
+## Mobile UPI Intent
+
+Mobile handoff follows the **one-time payment** scheme mappings in [Solidgate's UPI Intent guide](https://docs.solidgate.com/payments/alternative-payments/apms-overview/upi/upi-intent/). Selecting an app replaces only the `upi://pay` prefix; the original encoded query is preserved unchanged. The QR always contains the generic UPI URI, never an app-specific URI.
+
+| App | Payment prefix | Platforms |
+| --- | --- | --- |
+| Google Pay | `tez://upi/pay` | Android, iOS |
+| PhonePe | `phonepe://pay` | Android, iOS |
+| Paytm | `paytmmp://pay` | Android, iOS |
+| BHIM | `bhim://upi/pay` | Android, iOS |
+| CRED | `credpay://upi/pay` | Android, iOS |
+| Amazon Pay | `amazonpay://upi/pay` | Android |
+| Navi | `navi://pay` | Android |
+
+Google Pay, PhonePe, Paytm, and BHIM appear first; **Show more UPI apps** reveals the remaining apps for the device. Android also offers **Other UPI apps** using the generic URI. iOS has no generic chooser because its universal UPI app tray is not supported. Both mobile platforms offer **Show QR code instead** to scan using another phone.
+
+Device detection uses the browser's user agent and includes touch-enabled iPadOS browsers reporting a Macintosh user agent. A narrow desktop window remains QR-first. User-agent overrides and some embedded browsers can affect detection or app handoff.
+
+Links launch only on an explicit tap. The site cannot determine which apps are installed or whether a payment finished. If an app does not open, try another installed app, use the QR, or open the page in Safari/Chrome rather than an embedded browser. The displayed letters are app labels, not official logos. Apps listed by the provider without documented scheme mappings are not guessed or added.
+
+This is a static UPI link generator, **not a Solidgate Payment Form/API integration**. No provider session, 15-minute provider expiry, order tracking, webhook confirmation, or recurring mandate is implemented. Provider-specific amount limits do not apply to this page; the payment app and bank decide whether to accept an address-only payment link. The amount is still entered in the payment app.
 
 ## Run locally
 

@@ -1,5 +1,5 @@
 import { StrictMode } from 'react';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
@@ -23,6 +23,7 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 function navigate(path: string) {
@@ -76,6 +77,91 @@ describe('direct payment pages', () => {
     expect(await screen.findByRole('img', { name: 'UPI payment QR for alumni.fundcollection@boi' })).toBeTruthy();
     expect(screen.getByText('Choose the amount in your UPI app.')).toBeTruthy();
     expect(screen.getByText(/This site does not verify accounts or confirm payments/)).toBeTruthy();
+  });
+
+  describe('mobile app-specific payments', () => {
+    function renderMobile(userAgent: string, maxTouchPoints = 5) {
+      vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(userAgent);
+      vi.stubGlobal('navigator', Object.create(navigator, {
+        maxTouchPoints: { value: maxTouchPoints, configurable: true },
+      }));
+      window.history.replaceState(null, '', '/alumni.fundcollection@boi');
+      return render(<App />);
+    }
+
+    it('prioritizes Android app buttons, with more apps and a generic fallback', async () => {
+      const user = userEvent.setup();
+      renderMobile('Mozilla/5.0 (Linux; Android 15; Pixel 9) Chrome/140.0.0.0 Mobile Safari/537.36');
+      const picker = screen.getByRole('region', { name: 'Choose a UPI app' });
+      expect(within(picker).getAllByRole('link').map(link => link.textContent)).toHaveLength(5);
+      expect(screen.getByRole('link', { name: 'Pay with Google Pay' }).getAttribute('href')).toBe('tez://upi/pay?pa=alumni.fundcollection@boi&pn=JNV%20Sitamarhi%20Alumni');
+      expect(screen.getByRole('link', { name: 'Pay with PhonePe' }).getAttribute('href')).toBe('phonepe://pay?pa=alumni.fundcollection@boi&pn=JNV%20Sitamarhi%20Alumni');
+      expect(screen.getByRole('link', { name: 'Pay with Paytm' }).getAttribute('href')).toBe('paytmmp://pay?pa=alumni.fundcollection@boi&pn=JNV%20Sitamarhi%20Alumni');
+      expect(screen.getByRole('link', { name: 'Pay with BHIM' }).getAttribute('href')).toBe('bhim://upi/pay?pa=alumni.fundcollection@boi&pn=JNV%20Sitamarhi%20Alumni');
+      expect(screen.getByRole('link', { name: 'Other UPI apps' }).getAttribute('href')).toBe(alumniUri);
+      expect(screen.queryByRole('link', { name: 'Pay with Navi' })).toBeNull();
+      await user.click(screen.getByRole('button', { name: 'Show more UPI apps' }));
+      expect(screen.getByRole('link', { name: 'Pay with CRED' }).getAttribute('href')).toBe('credpay://upi/pay?pa=alumni.fundcollection@boi&pn=JNV%20Sitamarhi%20Alumni');
+      expect(screen.getByRole('link', { name: 'Pay with Amazon Pay' }).getAttribute('href')).toBe('amazonpay://upi/pay?pa=alumni.fundcollection@boi&pn=JNV%20Sitamarhi%20Alumni');
+      expect(screen.getByRole('link', { name: 'Pay with Navi' }).getAttribute('href')).toBe('navi://pay?pa=alumni.fundcollection@boi&pn=JNV%20Sitamarhi%20Alumni');
+      expect(screen.getByRole('button', { name: 'Show fewer apps' }).getAttribute('aria-expanded')).toBe('true');
+      await user.click(screen.getByRole('button', { name: 'Show fewer apps' }));
+      expect(screen.queryByRole('link', { name: 'Pay with Navi' })).toBeNull();
+    });
+
+    it.each([
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Mobile Safari/604.1',
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15) Version/18.0 Safari/605.1.15',
+    ])('does not offer the generic UPI tray or Android-only apps on iOS: %s', async userAgent => {
+      const user = userEvent.setup();
+      renderMobile(userAgent);
+      await user.click(screen.getByRole('button', { name: 'Show more UPI apps' }));
+      expect(screen.getByRole('link', { name: 'Pay with CRED' })).toBeTruthy();
+      expect(screen.queryByRole('link', { name: 'Other UPI apps' })).toBeNull();
+      expect(screen.queryByRole('link', { name: 'Pay with UPI app' })).toBeNull();
+      expect(screen.queryByRole('link', { name: 'Pay with Amazon Pay' })).toBeNull();
+      expect(screen.queryByRole('link', { name: 'Pay with Navi' })).toBeNull();
+      expect(document.querySelector('a[href^="upi:"]')).toBeNull();
+    });
+
+    it('keeps the original generic QR as an expandable mobile fallback', async () => {
+      const user = userEvent.setup();
+      renderMobile('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Mobile Safari/604.1');
+      await act(async () => {});
+      const qr = screen.getByRole('img', { name: 'UPI payment QR for alumni.fundcollection@boi', hidden: true });
+      expect(qr.closest('details')?.open).toBe(false);
+      await user.click(screen.getByText('Show QR code instead'));
+      expect(qr.closest('details')?.open).toBe(true);
+      expect(mockQr).toHaveBeenCalledWith(alumniUri, expect.objectContaining({ margin: 4 }));
+    });
+
+    it('offers recovery instructions without claiming that the app opened or payment succeeded', async () => {
+      renderMobile('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Mobile Safari/604.1');
+      await act(async () => {});
+      const appLink = screen.getByRole('link', { name: 'Pay with PhonePe' });
+      appLink.addEventListener('click', event => event.preventDefault());
+      fireEvent.click(appLink);
+      expect(screen.getByText(/If PhonePe doesn't open/).textContent).toContain('Safari or Chrome');
+      expect(screen.queryByText(/payment succeeded|payment confirmed|app opened/i)).toBeNull();
+      expect(screen.getByRole('link', { name: 'Pay with Google Pay' })).toBeTruthy();
+    });
+
+    it('still offers app buttons when mobile QR generation fails', async () => {
+      const user = userEvent.setup();
+      mockQr.mockRejectedValueOnce(new Error('QR failed'));
+      renderMobile('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Mobile Safari/604.1');
+      await user.click(screen.getByText('Show QR code instead'));
+      expect((await screen.findByRole('alert')).textContent).toContain('Could not generate the QR code');
+      expect(screen.getByRole('link', { name: 'Pay with PhonePe' }).getAttribute('href')).toBe('phonepe://pay?pa=alumni.fundcollection@boi&pn=JNV%20Sitamarhi%20Alumni');
+    });
+
+    it('does not show mobile-only app buttons on a desktop browser', async () => {
+      render(<App />);
+      navigate('/alumni.fundcollection@boi');
+      expect(await screen.findByRole('img', { name: /UPI payment QR/ })).toBeTruthy();
+      expect(screen.queryByRole('region', { name: 'Choose a UPI app' })).toBeNull();
+      expect(screen.getByRole('link', { name: 'Pay with UPI app' }).getAttribute('href')).toBe(alumniUri);
+    });
   });
 
   it('supports an encoded address and ignores query parameters that could change the payment', async () => {

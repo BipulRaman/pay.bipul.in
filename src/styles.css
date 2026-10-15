@@ -20,7 +20,7 @@ button, a { touch-action: manipulation; }
 button { cursor: pointer; }
 a { color: inherit; text-decoration: none; }
 a, button, input { -webkit-tap-highlight-color: transparent; }
-a:focus-visible, button:focus-visible, input:focus-visible { outline: 3px solid #478561; outline-offset: 4px; }
+a:focus-visible, button:focus-visible, input:focus-visible, summary:focus-visible { outline: 3px solid #478561; outline-offset: 4px; }
 main:focus { outline: none; }
 .icon { flex-shrink: 0; display: inline-block; vertical-align: middle; }
 .app-shell { max-width: 1120px; min-height: 100dvh; margin: 0 auto; padding: 0 40px; display: flex; flex-direction: column; }
@@ -71,6 +71,24 @@ input[aria-invalid="true"] { border-color: #a73434; }
 .qr-loading { color: var(--muted); font-size: 13px; }
 .amount-hint { margin: 12px 0 20px; font-size: 13px; color: var(--muted); }
 .device-hint { font-size: 12px; color: var(--muted); line-height: 1.8; margin: 16px 0 24px; }
+.upi-app-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.upi-app-button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-width: 0; min-height: 88px; padding: 12px 8px; border: 1px solid #cdd5dd; border-radius: 12px; font-size: 13px; font-weight: 600; }
+.upi-app-button:hover { background: #f1f7f3; border-color: #8eb59b; }
+.upi-app-mark { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; color: #fff; background: var(--green); font-size: 19px; font-weight: 700; }
+.app-google-pay { background: #2557a7; }
+.app-phonepe { background: #6739a6; }
+.app-paytm { background: #004c81; }
+.app-bhim { background: #317137; }
+.app-cred { background: #242424; }
+.app-amazon-pay { background: #664300; }
+.app-navi { background: #7140a0; }
+.show-apps-button { min-height: 44px; margin: 4px 0 8px; padding: 10px; border: 0; background: transparent; color: var(--green); font-size: 13px; font-weight: 600; }
+.show-apps-button:hover { text-decoration: underline; }
+.launch-notice { border-radius: 9px; padding: 12px; background: #edf5ef; color: #395b43; font-size: 12px; line-height: 1.7; text-align: left; }
+.qr-fallback { border-top: 1px solid var(--line); margin-bottom: 20px; }
+.qr-fallback summary { cursor: pointer; min-height: 48px; padding: 14px 0; color: var(--green); font-size: 13px; font-weight: 600; }
+.qr-fallback summary .icon { width: 16px; margin: 0 6px; }
+.qr-fallback .device-hint { margin-bottom: 0; }
 .payment-warning { display: flex; align-items: flex-start; gap: 10px; border-top: 1px solid var(--line); padding-top: 20px; text-align: left; color: #536851; }
 .payment-warning .icon { margin-top: 2px; width: 18px; }
 .payment-warning p { margin: 0; font-size: 12px; line-height: 1.7; }

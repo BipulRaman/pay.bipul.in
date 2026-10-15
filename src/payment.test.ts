@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import QRCode from 'qrcode';
 import {
-  EXAMPLE_UPI_ADDRESS, buildPaymentPath, buildUpiUri,
-  getPayeeName, getPaymentRoute, isValidUpiAddress,
+  EXAMPLE_UPI_ADDRESS, UPI_APPS, buildPaymentPath, buildUpiUri, buildUpiAppUri,
+  detectPaymentPlatform, getPayeeName, getPaymentRoute, getUpiApps, isValidUpiAddress,
 } from './payment';
+import type { PaymentPlatform, UpiAppId } from './payment';
 
 describe('UPI address validation', () => {
   it.each([
@@ -58,6 +59,54 @@ describe('UPI URI and QR', () => {
     expect(buildUpiUri(EXAMPLE_UPI_ADDRESS)).toBe(
       'upi://pay?pa=alumni.fundcollection@boi&pn=JNV%20Sitamarhi%20Alumni',
     );
+  });
+
+  describe('mobile UPI app intents', () => {
+    it.each<[UpiAppId, string]>([
+      ['google-pay', 'tez://upi/pay'],
+      ['phonepe', 'phonepe://pay'],
+      ['paytm', 'paytmmp://pay'],
+      ['bhim', 'bhim://upi/pay'],
+      ['cred', 'credpay://upi/pay'],
+      ['amazon-pay', 'amazonpay://upi/pay'],
+      ['navi', 'navi://pay'],
+    ])('uses the documented one-time prefix for %s', (appId, prefix) => {
+      expect(buildUpiAppUri(buildUpiUri(EXAMPLE_UPI_ADDRESS), appId)).toBe(
+        `${prefix}?pa=alumni.fundcollection@boi&pn=JNV%20Sitamarhi%20Alumni`,
+      );
+    });
+
+    it.each(UPI_APPS)('preserves every original query byte for $name', app => {
+      const query = '?pa=merchant%40upi&pn=Studio%20%26%20Friends&tr=REF-1&tn=A%2BB%20%26%20C&am=299.00&cu=INR';
+      const genericUri = `upi://pay${query}`;
+      const appUri = buildUpiAppUri(genericUri, app.id);
+      expect(appUri).toBe(`${app.prefix}${query}`);
+      expect(new URL(appUri).search).toBe(new URL(genericUri).search);
+    });
+
+    it.each(['https://example.com/pay?pa=alice@upi', 'upi://mandate?pa=alice@upi', 'upi://pay', 'upi://payment?pa=alice@upi'])('refuses non-payment URI %s', uri => {
+      expect(() => buildUpiAppUri(uri, 'google-pay')).toThrow('Expected a one-time UPI payment URI');
+    });
+
+    it.each<[string, number, PaymentPlatform]>([
+      ['Mozilla/5.0 (Linux; Android 15; Pixel 9) Chrome/140.0.0.0 Mobile Safari/537.36', 5, 'android'],
+      ['Mozilla/5.0 (Linux; Android 14; Tablet) Chrome/140.0.0.0 Safari/537.36', 5, 'android'],
+      ['Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Mobile Safari/604.1', 5, 'ios'],
+      ['Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) Mobile Safari/604.1', 5, 'ios'],
+      ['Mozilla/5.0 (iPod touch; CPU iPhone OS 15_0 like Mac OS X)', 5, 'ios'],
+      ['Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15) Version/18.0 Safari/605.1.15', 5, 'ios'],
+      ['Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15) Version/18.0 Safari/605.1.15', 0, 'desktop'],
+      ['Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/140.0.0.0 Safari/537.36', 10, 'desktop'],
+      ['', 0, 'desktop'],
+    ])('detects the payment platform for %s', (userAgent, touches, platform) => {
+      expect(detectPaymentPlatform(userAgent, touches)).toBe(platform);
+    });
+
+    it('offers the documented iOS apps without Android-only apps', () => {
+      expect(getUpiApps('ios').map(app => app.id)).toEqual(['google-pay', 'phonepe', 'paytm', 'bhim', 'cred']);
+      expect(getUpiApps('android').map(app => app.id)).toEqual(['google-pay', 'phonepe', 'paytm', 'bhim', 'cred', 'amazon-pay', 'navi']);
+      expect(getUpiApps('desktop')).toEqual([]);
+    });
   });
 
   it('uses any valid address as the destination and fallback display label', () => {
